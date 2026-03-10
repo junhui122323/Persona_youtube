@@ -35,6 +35,13 @@ HTML_TEMPLATE = """
         </form>
 
         {% if result %}
+        {% if title %}
+        <div class="mb-6 text-center">
+            <h2 class="text-2xl font-bold text-yellow-400">
+                🎬 {{ title }}
+            </h2>
+        </div>
+        {% endif %}
         <div class="space-y-6 text-left animate-in fade-in duration-500">
             <div class="bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-xl">
                 <h2 class="text-xl font-bold mb-3 text-emerald-400 text-center uppercase">📌 AI 분석 리포트</h2>
@@ -74,19 +81,31 @@ def get_transcript_via_ytdlp(url):
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+
+        title = info.get("title")
         subtitles = info.get('requested_subtitles')
-        
+
         if subtitles:
             lang = list(subtitles.keys())[0]
             sub_url = subtitles[lang]['url']
             res = requests.get(sub_url)
-            # JSON 데이터일 경우 텍스트만 추출하는 간단한 전처리 (Ollama용)
-            return res.text
-        return None
+
+            return {
+                "title": title,
+                "text": res.text
+            }
+
+        return {
+            "title": title,
+            "text": None
+        }
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return Template(HTML_TEMPLATE).render(result=None)
+    return Template(HTML_TEMPLATE).render(
+        result=None,
+        title=None
+    )
 
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(url: str = Form(...)):
@@ -94,11 +113,16 @@ async def analyze(url: str = Form(...)):
     print(f"🚀 분석 프로세스 가동: {url}")
     
     try:
-        t_text = get_transcript_via_ytdlp(url)
+        data = get_transcript_via_ytdlp(url)
+
+        title = data["title"]
+        t_text = data["text"]
+
+        print(f"🎬 영상 제목: {title}")
         
         if not t_text:
             print("❌ 자막을 찾을 수 없습니다.")
-            return "<h2>자막을 찾을 수 없습니다.</h2>"
+            return f"<h2>자막 없음</h2><p>{title}</p>"
 
         # [추가] 터미널에 자막 내용 출력 (앞부분 500자)
         print("-" * 50)
@@ -120,10 +144,13 @@ async def analyze(url: str = Form(...)):
         print("✨ 분석 완료!")
         print("="*50 + "\n")
 
-        return Template(HTML_TEMPLATE).render(result={
+        return Template(HTML_TEMPLATE).render(
+            result={
             "summary": data.get("summary", ""),
             "personas": data.get("personas", [])
-        })
+            },
+            title=title
+        )
 
     except Exception as e:
         print(f"❌ 에러 발생: {str(e)}")
